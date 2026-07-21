@@ -1,0 +1,3 @@
+# Garante LF em scripts shell mesmo em checkout no Windows.
+# CRLF em .sh quebra a execução dentro do container Linux (erro "bad interpreter").
+*.sh text eol=lf

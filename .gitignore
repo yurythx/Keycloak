@@ -1,0 +1,19 @@
+# Segredos e configuração local — nunca commitar
+.env
+secrets/*.txt
+nginx/certs/*.pem
+nginx/certs/*.key
+certs/*.pem
+certs/*.crt
+certs/*.p12
+certs/*.pfx
+
+# Mantém as pastas no git, mas ignora o conteúdo sensível
+!secrets/.gitkeep
+!nginx/certs/.gitkeep
+!certs/.gitkeep
+
+# Docker / OS
+*.log
+.DS_Store
+Thumbs.db

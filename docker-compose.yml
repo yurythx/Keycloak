@@ -1,0 +1,168 @@
+name: keycloak-stack
+
+# =============================================================================
+# STACK DE AUTENTICAÇÃO CENTRALIZADA (Keycloak 26 + Postgres + Nginx TLS)
+#
+# Uso:
+#   1. cp .env.example .env            e ajuste os valores
+#   2. ./scripts/generate-secrets.ps1  (gera senhas fortes em secrets/*.txt)
+#   3. Coloque o certificado da CA do Active Directory em ./certs/
+#   4. docker compose up -d --build
+#
+# Detalhes e checklist de produção: ver README.md
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. BANCO DE DADOS (PostgreSQL)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: keycloak_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-keycloak}
+      POSTGRES_USER: ${POSTGRES_USER:-keycloak_user}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    # Sem "ports": o Postgres não fica acessível fora da rede interna do compose.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-keycloak_user} -d ${POSTGRES_DB:-keycloak}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    cpus: 1
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # 2. KEYCLOAK (build otimizado, sem porta exposta diretamente ao host)
+  # ---------------------------------------------------------------------------
+  keycloak:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: keycloak-custom:26.0
+    container_name: keycloak_server
+    command: ["start", "--optimized"]
+    environment:
+      # --- Banco de dados ---
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-keycloak}
+      KC_DB_USERNAME: ${POSTGRES_USER:-keycloak_user}
+      KC_DB_PASSWORD_FILE: /run/secrets/postgres_password
+
+      # --- Admin inicial (só é lido no primeiro boot do realm master) ---
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-kc_admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/kc_admin_password
+
+      # --- Hostname / proxy reverso (TLS termina no Nginx) ---
+      KC_HOSTNAME: "${KC_HOSTNAME:?defina KC_HOSTNAME no .env, ex - https://auth.suaempresa.com}"
+      KC_HOSTNAME_STRICT: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_PROXY_TRUSTED_ADDRESSES: ${PROXY_TRUSTED_ADDRESSES:-172.16.0.0/12}
+
+      # --- Confiança no CA do Active Directory (LDAPS) ---
+      # Diretório é escaneado recursivamente; basta soltar o .pem/.crt em ./certs
+      KC_TRUSTSTORE_PATHS: /opt/keycloak/certs
+
+      # --- Observabilidade ---
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_LOG_LEVEL: ${KC_LOG_LEVEL:-INFO}
+    secrets:
+      - postgres_password
+      - kc_admin_password
+    volumes:
+      - ./certs:/opt/keycloak/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    healthcheck:
+      # A imagem não tem curl; usa /dev/tcp do bash contra o endpoint de
+      # management (porta 9000), que é onde o /health/ready fica exposto
+      # por padrão a partir do Keycloak 24+.
+      test:
+        - "CMD-SHELL"
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '200' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 1536m
+    cpus: 2
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # -------------------------------------------------------------------------
+    # 3. INTEGRAÇÃO COM ACTIVE DIRECTORY (resolução de nomes do DC)
+    # -------------------------------------------------------------------------
+    extra_hosts:
+      - "${AD_DOMAIN:?defina AD_DOMAIN no .env}:${AD_DC_IP:?defina AD_DC_IP no .env}"
+      - "${AD_DC_HOSTNAME:?defina AD_DC_HOSTNAME no .env}:${AD_DC_IP:?defina AD_DC_IP no .env}"
+    dns:
+      - ${AD_DC_IP:?defina AD_DC_IP no .env}
+      - 1.1.1.1 # fallback público, evita ficar sem DNS se o DC cair
+
+  # ---------------------------------------------------------------------------
+  # 3. REVERSE PROXY (TLS termination — único serviço exposto ao host)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: keycloak_proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - frontend
+    mem_limit: 128m
+    cpus: 0.5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# =============================================================================
+volumes:
+  postgres_data:
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true # Postgres não tem rota de saída nenhuma, nem para a internet
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  kc_admin_password:
+    file: ./secrets/kc_admin_password.txt
