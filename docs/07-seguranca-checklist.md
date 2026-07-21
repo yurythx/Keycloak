@@ -4,7 +4,7 @@ Use esta lista antes de liberar o Keycloak para autenticar usuários reais.
 
 ## Rede e exposição
 
-- [ ] Só o Nginx publica portas no host (`80`/`443`) — confirmado por padrão neste projeto
+- [ ] Nenhum serviço deste compose publica porta no host — confirmado por padrão neste projeto; a exposição pública é feita pelo proxy externo (Coolify ou outro)
 - [ ] `PROXY_TRUSTED_ADDRESSES` restrito à(s) rede(s) real(is) do proxy, não um range genérico amplo demais
 - [ ] Porta de management (`9000`, health/metrics) **não** exposta para fora da rede Docker
 - [ ] Firewall entre o host Docker e o Domain Controller libera só o necessário (636/LDAPS, 53/DNS)
@@ -19,7 +19,7 @@ Use esta lista antes de liberar o Keycloak para autenticar usuários reais.
 
 ## TLS / Certificados
 
-- [ ] Certificado autoassinado de desenvolvimento **substituído** por um certificado real (CA corporativa ou Let's Encrypt) — ver [04-certificados-tls.md](04-certificados-tls.md)
+- [ ] Proxy externo configurado com um certificado real (CA corporativa ou Let's Encrypt), não autoassinado — ver [04-certificados-tls.md](04-certificados-tls.md)
 - [ ] `KC_HOSTNAME` aponta para a URL pública real, com `https://`
 - [ ] Federação LDAP usa `ldaps://` (porta 636), nunca `ldap://` simples
 - [ ] Certificado da CA do AD instalado em `certs/` e validado com **Test connection** no Admin Console

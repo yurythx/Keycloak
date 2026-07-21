@@ -1,53 +1,33 @@
 # Certificados TLS
 
-Existem **dois** certificados diferentes neste projeto — não confunda os dois:
+Existe **um** certificado gerenciado por este projeto — não confunda com o
+certificado TLS público, que é responsabilidade do proxy externo (fora deste
+compose, ver abaixo):
 
 | Certificado | Onde fica | Para que serve |
 |---|---|---|
-| Certificado TLS do Nginx | `nginx/certs/fullchain.pem` + `privkey.pem` | Servir `https://<KC_HOSTNAME>` aos usuários/navegadores |
 | Certificado da CA do Active Directory | `certs/*.pem` | Fazer o **Keycloak confiar** no certificado LDAPS apresentado pelo Domain Controller |
 
-## 1. Certificado TLS do Nginx
+## 1. TLS público (`https://<KC_HOSTNAME>`)
 
-### Desenvolvimento / teste
+Este compose **não termina TLS** — o Keycloak fala HTTP puro na rede interna
+(`KC_HTTP_ENABLED=true`) e espera um proxy reverso externo na frente cuidando
+do certificado público. Como configurar isso depende de onde a stack roda:
 
-`scripts/generate-secrets.ps1` já gera um certificado autoassinado válido por
-365 dias (CN=`auth.local`), se o OpenSSL estiver no PATH. O navegador vai
-mostrar aviso de "conexão não segura" — esperado, é autoassinado.
+- **Coolify**: aponte o domínio do serviço `keycloak` (porta `8080`) nas
+  configurações do recurso. Se o host tiver alcance público, a Coolify emite
+  e renova um certificado Let's Encrypt automaticamente. Se for ambiente
+  **interno** (sem alcance público — o cenário mais comum aqui, dado o uso de
+  LDAPS/AD), faça upload do certificado da sua CA corporativa direto na aba de
+  domínio/SSL da Coolify, em vez de depender de Let's Encrypt.
+- **Nginx/Traefik próprio**: se preferir manter um proxy dedicado fora deste
+  compose, aponte-o para `keycloak:8080` na rede `frontend` e termine TLS lá,
+  com o certificado da sua CA corporativa.
 
-Se preferir gerar manualmente:
-
-```powershell
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 `
-  -keyout nginx\certs\privkey.pem -out nginx\certs\fullchain.pem `
-  -subj "/CN=auth.local" `
-  -addext "subjectAltName=DNS:auth.local,DNS:localhost"
-```
-
-### Produção — certificado da CA corporativa
-
-Se sua empresa tem uma CA interna (comum em ambientes com Active Directory /
-ADCS), gere um certificado para o hostname público do Keycloak (o mesmo valor
-de `KC_HOSTNAME`, sem o `https://`) e coloque os arquivos em:
-
-```
-nginx/certs/fullchain.pem   # certificado + cadeia intermediária, nessa ordem
-nginx/certs/privkey.pem     # chave privada, sem senha
-```
-
-Depois de trocar os arquivos:
-
-```powershell
-docker compose restart nginx
-```
-
-### Produção — Let's Encrypt (se o host for público na internet)
-
-Se o Keycloak vai ser acessado pela internet pública (não só rede interna),
-uma opção é usar `certbot` para emitir/renovar automaticamente. Isso está fora
-do escopo deste compose (normalmente exige um container `certbot` adicional
-com validação HTTP-01 ou DNS-01) — avalie se faz sentido para o seu cenário
-antes de adicionar essa peça.
+Em qualquer caso, confirme que `KC_PROXY_TRUSTED_ADDRESSES`
+(`docker-compose.yml`) cobre o IP/rede de onde esse proxy fala com o
+Keycloak — caso contrário os cabeçalhos `X-Forwarded-*` são ignorados e o
+Keycloak não reconhece a conexão como HTTPS.
 
 ## 2. Certificado da CA do Active Directory
 
@@ -89,6 +69,11 @@ O nome do arquivo não importa — `KC_TRUSTSTORE_PATHS=/opt/keycloak/certs`
 escaneia o diretório inteiro, recursivamente, incluindo arquivos `.pem`,
 `.crt`, `.p12` e `.pfx` (PKCS12 precisa estar **sem senha**).
 
+Se o deploy for via Coolify (Docker Compose), lembre que `certs/` está no
+`.gitignore` e não vem com o clone do repositório — copie o arquivo direto no
+servidor (aba **Terminal** da Coolify ou SSH), no diretório onde a Coolify
+clonou o projeto.
+
 > ⚠️ O truststore é carregado na inicialização do Keycloak. Depois de
 > adicionar/trocar um certificado em `certs/`, é preciso reiniciar o container:
 > ```powershell
@@ -106,8 +91,8 @@ casar. Veja a seção específica em
 
 | Certificado | Validade típica | O que fazer ao vencer |
 |---|---|---|
-| TLS do Nginx (autoassinado de dev) | 365 dias (fixado no script) | Gerar de novo com `generate-secrets.ps1` (apague os arquivos antigos primeiro) |
-| TLS do Nginx (CA corporativa) | Depende da política da empresa | Substituir os arquivos e `docker compose restart nginx` |
+| TLS público (Let's Encrypt via Coolify) | 90 dias | Renovado automaticamente pela Coolify |
+| TLS público (CA corporativa, via Coolify ou proxy próprio) | Depende da política da empresa | Fazer novo upload do certificado no local onde ele foi configurado |
 | CA do Active Directory | Anos (CA raiz normalmente é de longa duração) | Repetir a exportação e `docker compose restart keycloak` |
 
 ## Próximo passo

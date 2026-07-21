@@ -15,7 +15,7 @@
 
 | Origem | Destino | Porta | Motivo |
 |---|---|---|---|
-| Usuários/aplicações | Host onde roda o Nginx | 443/tcp (e 80/tcp para redirect) | Login, emissão de tokens |
+| Usuários/aplicações | Host onde roda o proxy externo (Coolify, Nginx, Traefik, etc.) | 443/tcp (e 80/tcp para redirect) | Login, emissão de tokens |
 | Container Keycloak | Domain Controller do AD | 636/tcp (LDAPS) | Federação de identidade |
 | Container Keycloak | Domain Controller do AD | 53/tcp+udp (DNS) | Resolução do FQDN do DC |
 | — | Postgres | 5432 | **Não precisa** — fica só na rede interna `backend` |
@@ -44,7 +44,7 @@ Referência completa de cada variável:
 | `POSTGRES_DB` | não (default `keycloak`) | `keycloak` | Nome do banco criado no Postgres |
 | `POSTGRES_USER` | não (default `keycloak_user`) | `keycloak_user` | Usuário dono do banco |
 | `KC_BOOTSTRAP_ADMIN_USERNAME` | não (default `kc_admin`) | `kc_admin` | Usuário admin criado **apenas no primeiro boot** do realm master |
-| `KC_HOSTNAME` | **sim** | `https://auth.suaempresa.com` | URL pública usada nos tokens/issuers — precisa bater com o que o Nginx serve |
+| `KC_HOSTNAME` | **sim** | `https://auth.suaempresa.com` | URL pública usada nos tokens/issuers — precisa bater com o que o proxy externo serve |
 | `KC_LOG_LEVEL` | não (default `INFO`) | `INFO`, `DEBUG`, `WARN` | Verbosidade de log |
 | `PROXY_TRUSTED_ADDRESSES` | não (default `172.16.0.0/12`) | CIDR da rede Docker/host | De onde o Keycloak aceita confiar nos cabeçalhos `X-Forwarded-*` |
 | `AD_DOMAIN` | **sim** | `meudominio.local` | FQDN do domínio, usado para resolução de nomes dentro do container |
@@ -54,7 +54,7 @@ Referência completa de cada variável:
 As senhas (Postgres e admin do Keycloak) **não ficam no `.env`** — são geradas
 como arquivos separados no passo seguinte.
 
-## 3. Gerar as senhas e o certificado de desenvolvimento
+## 3. Gerar as senhas
 
 ```powershell
 .\scripts\generate-secrets.ps1
@@ -64,10 +64,10 @@ O script:
 
 1. Gera uma senha aleatória forte (32 caracteres) em `secrets/postgres_password.txt`
 2. Gera outra em `secrets/kc_admin_password.txt`
-3. Se o OpenSSL estiver no PATH, gera um certificado TLS autoassinado em
-   `nginx/certs/fullchain.pem` / `privkey.pem` (**apenas para desenvolvimento** —
-   troque por um certificado real antes de produção, ver [04-certificados-tls.md](04-certificados-tls.md))
-4. Não sobrescreve nada que já exista — seguro rodar mais de uma vez
+3. Não sobrescreve nada que já exista — seguro rodar mais de uma vez
+
+O certificado TLS público **não é gerado aqui** — é configurado no proxy
+externo (Coolify ou outro), ver [04-certificados-tls.md](04-certificados-tls.md).
 
 Se preferir gerar manualmente (sem o script):
 
@@ -104,7 +104,10 @@ Isso vai, na ordem:
 1. Construir a imagem customizada do Keycloak (`Dockerfile` → `kc.sh build`)
 2. Subir o Postgres e esperar o `healthcheck` (`pg_isready`) ficar OK
 3. Subir o Keycloak (só depois do Postgres estar saudável — `depends_on: condition: service_healthy`)
-4. Subir o Nginx (só depois do Keycloak responder `/health/ready` — pode levar 30–60s na primeira vez)
+
+Depois disso, configure o proxy externo (Coolify ou outro) apontando para
+`keycloak:8080` — sem isso, `https://<KC_HOSTNAME>` não fica acessível.
+Ver [04-certificados-tls.md](04-certificados-tls.md).
 
 ## 6. Acompanhar a inicialização
 

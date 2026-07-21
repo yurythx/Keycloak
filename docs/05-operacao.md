@@ -9,10 +9,8 @@ docker compose ps
 # Logs em tempo real de um serviço
 docker compose logs -f keycloak
 docker compose logs -f postgres
-docker compose logs -f nginx
 
 # Reiniciar um serviço específico (ex: depois de trocar um certificado)
-docker compose restart nginx
 docker compose restart keycloak
 
 # Parar/subir a stack inteira

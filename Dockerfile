@@ -30,3 +30,6 @@ RUN chmod +x /opt/keycloak/bin/entrypoint-secrets.sh
 USER 1000
 
 ENTRYPOINT ["/opt/keycloak/bin/entrypoint-secrets.sh"]
+# Default caso o orquestrador não informe um comando (ex.: deploy fora do
+# docker-compose.yml, que normalmente sobrescreve isto com "start --optimized").
+CMD ["start", "--optimized"]

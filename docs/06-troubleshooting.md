@@ -27,15 +27,15 @@
 - Confirme que `KC_HOSTNAME` está definido no `.env` (é obrigatório —
   o compose falha explicitamente se estiver vazio, mas confira mesmo assim)
 
-### Nginx retorna `502 Bad Gateway`
+### Proxy externo retorna `502 Bad Gateway` / `Bad Gateway`
 
 - Normal nos primeiros ~30-60 segundos enquanto o Keycloak ainda sobe —
-  o Nginx só inicia depois do healthcheck do Keycloak passar
-  (`depends_on: condition: service_healthy`), então isso não deveria
-  acontecer em condições normais depois do `docker compose up`
+  configure o proxy externo (Coolify ou outro) para só rotear depois do
+  healthcheck do Keycloak passar, se ele suportar isso
 - Se persistir: `docker compose logs keycloak` para confirmar que ele
-  realmente terminou de subir; `docker compose exec nginx nginx -t` para
-  validar a sintaxe do `nginx.conf`
+  realmente terminou de subir e está `healthy` (`docker compose ps`)
+- Confirme que o proxy está apontando para `keycloak:8080` (HTTP, não HTTPS)
+  na mesma rede Docker
 
 ## Certificados
 
@@ -48,9 +48,9 @@
 
 ### Navegador mostra aviso de certificado inválido
 
-- Esperado com o certificado autoassinado de desenvolvimento
-  (`generate-secrets.ps1`). Para produção, troque pelos arquivos reais em
-  `nginx/certs/` — ver [04-certificados-tls.md](04-certificados-tls.md)
+- O certificado TLS público é responsabilidade do proxy externo (fora deste
+  compose) — verifique lá o certificado configurado (Coolify: aba de
+  domínio/SSL do recurso). Ver [04-certificados-tls.md](04-certificados-tls.md)
 
 ### Erro de redirecionamento infinito / "We're sorry..." no login
 
@@ -59,9 +59,10 @@ ou o Keycloak não confiando nos cabeçalhos do proxy:
 
 - Confirme que `KC_HOSTNAME` no `.env` é exatamente a URL pública
   (`https://auth.suaempresa.com`, sem barra no final)
-- Confirme que `PROXY_TRUSTED_ADDRESSES` cobre o IP interno de onde o Nginx
-  fala com o Keycloak (o range default `172.16.0.0/12` cobre as redes
-  Docker padrão — se você customizou as sub-redes do compose, ajuste aqui)
+- Confirme que `PROXY_TRUSTED_ADDRESSES` cobre o IP interno de onde o proxy
+  externo fala com o Keycloak (o range default `172.16.0.0/12` cobre as redes
+  Docker padrão — se você customizou as sub-redes do compose, ou a Coolify usa
+  uma rede fora desse range, ajuste aqui)
 
 ## Federação LDAP
 
